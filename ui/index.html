@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agriculture Knowledge Base</title>
+  <style>
+    :root { --navy:#163a5f; --blue:#2d6a9f; --teal:#197c7c; --orange:#d9782a; --ink:#263238; --muted:#65727c; --line:#d7dee5; --bg:#f5f7f9; --card:#fff; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    header { background:linear-gradient(120deg,var(--navy),#245f85); color:white; padding:28px 32px 30px; }
+    header .wrap, main { max-width:1180px; margin:0 auto; }
+    h1 { margin:0 0 5px; font-size:28px; letter-spacing:-.3px; }
+    header p { margin:0; color:#d9e8f1; }
+    main { padding:24px 20px 48px; }
+    .grid { display:grid; gap:16px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-bottom:22px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; box-shadow:0 2px 10px rgba(22,58,95,.05); }
+    .metric-label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+    .metric { color:var(--navy); font-size:28px; font-weight:700; margin-top:5px; }
+    section { margin-top:20px; }
+    h2 { color:var(--navy); font-size:20px; margin:0 0 12px; }
+    .search { display:flex; gap:10px; }
+    input { flex:1; border:1px solid #b8c5cf; border-radius:8px; padding:12px 13px; font:inherit; background:white; }
+    button { border:0; border-radius:8px; padding:11px 16px; font:600 14px inherit; cursor:pointer; background:var(--blue); color:white; }
+    button.secondary { background:#e6eef4; color:var(--navy); }
+    button:disabled { opacity:.55; cursor:wait; }
+    #message { color:var(--muted); margin:11px 0 0; min-height:22px; }
+    .two { display:grid; grid-template-columns:1.1fr .9fr; gap:20px; align-items:start; }
+    .answer { border-left:4px solid var(--teal); background:#e8f5f3; }
+    .answer-text { white-space:pre-wrap; font-size:16px; line-height:1.6; }
+    .status-line { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; margin-top:8px; }
+    .result { border-top:1px solid var(--line); padding:13px 0; }
+    .result:first-child { border-top:0; padding-top:0; }
+    .result-title { font-weight:700; color:var(--navy); }
+    .meta { color:var(--muted); font-size:12px; margin-top:3px; }
+    .snippet { margin-top:7px; white-space:pre-wrap; }
+    .pill { display:inline-block; padding:3px 8px; border-radius:999px; font-size:11px; margin:3px 4px 0 0; background:#e7f5f1; color:#11635f; }
+    .pill.error { background:#ffebe5; color:#a34323; }
+    .pill.running { background:#fff4dc; color:#8a5a00; }
+    .ingest { display:grid; grid-template-columns:1.1fr .9fr; gap:18px; align-items:start; }
+    .dropzone { border:1.5px dashed #9db4c6; border-radius:10px; padding:22px; background:#f8fbfd; }
+    .dropzone input { width:100%; flex:auto; padding:10px; }
+    .dropzone p { color:var(--muted); margin:9px 0 0; font-size:13px; }
+    .job { border-top:1px solid var(--line); padding:11px 0; }
+    .job:first-child { border-top:0; padding-top:0; }
+    .job-head { display:flex; justify-content:space-between; gap:10px; align-items:center; }
+    .job-name { font-weight:700; color:var(--navy); }
+    .job-meta { color:var(--muted); font-size:12px; margin-top:4px; }
+    .empty { color:var(--muted); padding:8px 0; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th,td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--navy); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+    footer { color:var(--muted); text-align:center; font-size:12px; margin-top:26px; }
+    @media (max-width:850px) { .grid,.two,.ingest { grid-template-columns:1fr 1fr; } }
+    @media (max-width:600px) { .grid,.two,.ingest { grid-template-columns:1fr; } .search { flex-direction:column; } header { padding:24px 20px; } }
+  </style>
+</head>
+<body>
+  <header><div class="wrap"><h1>Agriculture Knowledge Base</h1><p>Local-first RAG workspace for PMFBY, ICRISAT, APEDA and local agriculture data</p></div></header>
+  <main>
+    <div class="grid" id="metrics"><div class="card"><div class="metric-label">Knowledge base</div><div class="metric">Loading</div></div><div class="card"><div class="metric-label">Facts</div><div class="metric">-</div></div><div class="card"><div class="metric-label">Documents</div><div class="metric">-</div></div><div class="card"><div class="metric-label">Sources</div><div class="metric">-</div></div></div>
+    <section class="ingest">
+      <div class="card">
+        <h2>Upload and process data</h2>
+        <div class="dropzone">
+          <input id="uploadFiles" type="file" multiple accept=".xlsx,.csv,.tsv,.docx,.pdf,.html,.htm,.json,.txt,.md" />
+          <p>Supported: XLSX, CSV/TSV, DOCX, PDF, HTML, JSON, TXT and Markdown. Files stay on this server. Uploads are checksummed, preserved, extracted and added as a new knowledge-base release.</p>
+          <button id="uploadBtn" style="margin-top:14px">Process selected files</button>
+          <div id="uploadMessage" class="status-line"></div>
+        </div>
+      </div>
+      <div class="card"><h2>Ingestion activity</h2><div id="jobs" class="empty">No upload jobs yet.</div></div>
+    </section>
+    <section class="card">
+      <h2>Search the knowledge base</h2>
+      <div class="search"><input id="question" placeholder="Try: Madurai highly stressed acreage 15 October 2026" /><button id="askBtn">Ask model</button><button class="secondary" id="searchBtn">Retrieve evidence</button><button class="secondary" id="clearBtn">Clear</button></div>
+      <div id="message">Enter a question to retrieve matching facts and document passages.</div>
+    </section>
+    <section class="card answer"><h2>Model answer</h2><div id="answer" class="empty">No model answer yet.</div><div id="modelStatus" class="status-line"></div></section>
+    <section class="two">
+      <div class="card"><h2>Structured facts</h2><div id="facts" class="empty">No results yet.</div></div>
+      <div class="card"><h2>Document evidence</h2><div id="documents" class="empty">No results yet.</div></div>
+    </section>
+    <section class="card"><h2>Source status</h2><div id="sources" class="empty">Loading sources...</div></section>
+    <footer>Local-first office deployment. Uploaded source files remain on the server and are tracked with checksums and ingestion jobs.</footer>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    function renderMetrics(data) {
+      const values = [data.status === 'ok' ? 'Ready' : 'Error', data.facts, data.documents, data.sources];
+      $('metrics').innerHTML = ['Knowledge base','Facts','Documents','Sources'].map((label,i) => `<div class="card"><div class="metric-label">${label}</div><div class="metric">${esc(values[i])}</div></div>`).join('');
+    }
+    function renderSources(rows) {
+      if (!rows.length) { $('sources').innerHTML = '<div class="empty">No source records found.</div>'; return; }
+      $('sources').innerHTML = `<table><thead><tr><th>Source</th><th>Type</th><th>Status</th><th>Location</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.source)}</td><td>${esc(r.source_type)}</td><td><span class="pill ${r.status === 'ok' ? '' : 'error'}">${esc(r.status)}</span></td><td>${esc(r.location || '')}</td></tr>`).join('')}</tbody></table>`;
+    }
+    function renderFacts(rows) {
+      if (!rows.length) { $('facts').innerHTML = '<div class="empty">No matching structured facts.</div>'; return; }
+      $('facts').innerHTML = rows.map(r => `<div class="result"><div class="result-title">${esc(r.metric)} = ${esc(r.value)} <span class="pill">${esc(r.unit)}</span></div><div class="meta">${esc(r.source_file)} / ${esc(r.sheet_name)} / row ${esc(r.row_number)}</div><div class="snippet">${esc(r.context)}</div></div>`).join('');
+    }
+    function renderDocuments(rows) {
+      if (!rows.length) { $('documents').innerHTML = '<div class="empty">No matching document passages.</div>'; return; }
+      $('documents').innerHTML = rows.map(r => `<div class="result"><div class="result-title">${esc(r.source_file)} <span class="pill">score ${esc(r.score)}</span></div><div class="meta">${esc(r.location)}</div><div class="snippet">${esc(r.text)}</div></div>`).join('');
+    }
+    async function loadHealth() {
+      const response = await fetch('/api/health');
+      const data = await response.json();
+      renderMetrics(data);
+    }
+    async function loadSources() {
+      const response = await fetch('/api/sources');
+      renderSources(await response.json());
+    }
+    function statusClass(status) { return status === 'complete' ? '' : (status === 'error' || status === 'interrupted' ? 'error' : 'running'); }
+    function renderJobs(rows) {
+      if (!rows.length) { $('jobs').innerHTML = '<div class="empty">No upload jobs yet.</div>'; return; }
+      $('jobs').innerHTML = rows.slice(0, 8).map(job => {
+        const names = (job.files || []).map(file => esc(file.name)).join(', ');
+        const report = job.report ? ` · ${esc(job.report.facts)} facts · ${esc(job.report.documents)} documents` : '';
+        const error = job.error ? `<div class="job-meta" style="color:#a34323">${esc(job.error)}</div>` : '';
+        return `<div class="job"><div class="job-head"><span class="job-name">${names || esc(job.id)}</span><span class="pill ${statusClass(job.status)}">${esc(job.status)}</span></div><div class="job-meta">${esc(job.message || '')}${report}</div>${error}</div>`;
+      }).join('');
+    }
+    async function loadJobs() {
+      const response = await fetch('/api/jobs');
+      const rows = await response.json();
+      renderJobs(rows);
+      return rows;
+    }
+    async function uploadFiles() {
+      const files = Array.from($('uploadFiles').files || []);
+      if (!files.length) { $('uploadMessage').textContent = 'Choose one or more files first.'; return; }
+      const form = new FormData();
+      files.forEach(file => form.append('files', file));
+      $('uploadBtn').disabled = true;
+      $('uploadMessage').textContent = 'Uploading and starting the ingestion job...';
+      try {
+        const response = await fetch('/api/upload', {method:'POST', body:form});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Upload failed');
+        $('uploadMessage').textContent = `Job ${data.id} started. The knowledge base remains available during processing.`;
+        $('uploadFiles').value = '';
+        await loadJobs();
+        watchJob(data.id);
+      } catch (error) { $('uploadMessage').textContent = String(error); }
+      finally { $('uploadBtn').disabled = false; }
+    }
+    async function watchJob(jobId) {
+      const timer = setInterval(async () => {
+        try {
+          const response = await fetch('/api/jobs/' + encodeURIComponent(jobId));
+          const job = await response.json();
+          await loadJobs();
+          if (['complete','error','interrupted'].includes(job.status)) {
+            clearInterval(timer); await loadHealth(); await loadSources();
+            $('uploadMessage').textContent = job.status === 'complete' ? 'Processing completed. The dashboard has been refreshed.' : (job.error || 'Processing did not complete.');
+          }
+        } catch (error) { clearInterval(timer); }
+      }, 1500);
+    }
+    async function runSearch() {
+      const q = $('question').value.trim();
+      if (!q) return;
+      $('searchBtn').disabled = true;
+      $('message').textContent = 'Searching structured facts and document evidence...';
+      try {
+        const response = await fetch('/api/search?q=' + encodeURIComponent(q));
+        const data = await response.json();
+        renderFacts(data.facts || []); renderDocuments(data.documents || []);
+        $('message').textContent = `Retrieved ${(data.facts || []).length} facts and ${(data.documents || []).length} document passages.`;
+      } catch (error) { $('message').textContent = 'Search failed: ' + error; }
+      finally { $('searchBtn').disabled = false; }
+    }
+    async function askModel() {
+      const q = $('question').value.trim();
+      if (!q) return;
+      $('askBtn').disabled = true;
+      $('message').textContent = 'Retrieving evidence and asking the local model...';
+      try {
+        const response = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q})});
+        const data = await response.json();
+        renderFacts(data.facts || []); renderDocuments(data.documents || []);
+        if (data.answer) { $('answer').innerHTML = `<div class="answer-text">${esc(data.answer)}</div>`; $('modelStatus').textContent = `Generated by ${esc(data.model)}`; }
+        else { $('answer').innerHTML = `<div class="empty">${esc(data.error || 'No model answer returned. Evidence is shown below.')}</div>`; $('modelStatus').textContent = 'Evidence-only mode'; }
+        $('message').textContent = `Retrieved ${(data.facts || []).length} facts and ${(data.documents || []).length} document passages.`;
+      } catch (error) { $('message').textContent = 'Model request failed: ' + error; }
+      finally { $('askBtn').disabled = false; }
+    }
+    $('searchBtn').addEventListener('click', runSearch);
+    $('askBtn').addEventListener('click', askModel);
+    $('uploadBtn').addEventListener('click', uploadFiles);
+    $('question').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+    $('clearBtn').addEventListener('click', () => { $('question').value = ''; $('facts').innerHTML = '<div class="empty">No results yet.</div>'; $('documents').innerHTML = '<div class="empty">No results yet.</div>'; $('answer').innerHTML = '<div class="empty">No model answer yet.</div>'; $('modelStatus').textContent = ''; $('message').textContent = 'Enter a question to retrieve matching facts and document passages.'; });
+    async function loadModelStatus() { const response = await fetch('/api/llm'); const data = await response.json(); $('modelStatus').textContent = data.configured ? `Configured model: ${data.model}` : 'No Ollama model configured. Evidence retrieval is available.'; }
+    Promise.all([loadHealth(), loadSources(), loadModelStatus(), loadJobs()]).catch(error => { $('message').textContent = 'Could not load the knowledge base: ' + error; });
+  </script>
+</body>
+</html>

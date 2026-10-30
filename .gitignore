@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+data/raw/
+data/uploads/
+data/jobs/
+data/normalized/
+data/knowledge_base.duckdb
+data/manifest.json
+data/documents.jsonl
+data/facts.jsonl
+data/ingestion_report.json
+data/vector_index.jsonl
+data/vector_manifest.json
+tmp/
+
+# Local source files and datasets; keep these outside GitHub unless explicitly approved.
+/DHARWAD_District_Historical_Analysis_2017-2022_NDVI_RAINFALL.xlsx
+/Madurai_Paddy_Crop_Acreages_NDVI_Health_01-15Oct-2026_Weather_NDVI_SM.xlsx
+/India_Agriculture_Data_Sources_for_Ollama.docx
+

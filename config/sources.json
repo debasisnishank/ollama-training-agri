@@ -1,0 +1,39 @@
+{
+  "local_files": [
+    "DHARWAD_District_Historical_Analysis_2017-2022_NDVI_RAINFALL.xlsx",
+    "Madurai_Paddy_Crop_Acreages_NDVI_Health_01-15Oct-2026_Weather_NDVI_SM.xlsx",
+    "India_Agriculture_Data_Sources_for_Ollama.docx"
+  ],
+  "web_sources": [
+    {
+      "id": "pmfby_dashboard",
+      "url": "https://pmfby.gov.in/adminStatistics/dashboard",
+      "method": "GET",
+      "kind": "landing_page",
+      "authority": "PMFBY"
+    },
+    {
+      "id": "icrisat_data_home",
+      "url": "https://icrisat.org/resources/data/comparative-map-homepage",
+      "method": "GET",
+      "kind": "landing_page",
+      "authority": "ICRISAT"
+    },
+    {
+      "id": "apeda_india_production",
+      "url": "https://agriexchange.apeda.gov.in/Production/India/Index",
+      "method": "GET",
+      "kind": "landing_page",
+      "authority": "APEDA"
+    },
+    {
+      "id": "apeda_india_production_catalogue",
+      "url": "https://agriexchange.apeda.gov.in/Production/India/GetIndiaProduction",
+      "method": "POST",
+      "payload": {},
+      "kind": "api_snapshot",
+      "authority": "APEDA"
+    }
+  ]
+}
+
