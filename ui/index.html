@@ -14,7 +14,7 @@
     header p { margin:0; color:#d9e8f1; }
     main { padding:24px 20px 48px; }
     .grid { display:grid; gap:16px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-bottom:22px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; box-shadow:0 2px 10px rgba(22,58,95,.05); }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; box-shadow:0 2px 10px rgba(22,58,95,.05); min-width:0; overflow:hidden; }
     .metric-label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
     .metric { color:var(--navy); font-size:28px; font-weight:700; margin-top:5px; }
     section { margin-top:20px; }
@@ -31,9 +31,9 @@
     .status-line { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; margin-top:8px; }
     .result { border-top:1px solid var(--line); padding:13px 0; }
     .result:first-child { border-top:0; padding-top:0; }
-    .result-title { font-weight:700; color:var(--navy); }
-    .meta { color:var(--muted); font-size:12px; margin-top:3px; }
-    .snippet { margin-top:7px; white-space:pre-wrap; }
+    .result-title { font-weight:700; color:var(--navy); overflow-wrap:anywhere; word-break:break-word; }
+    .meta { color:var(--muted); font-size:12px; margin-top:3px; overflow-wrap:anywhere; word-break:break-word; }
+    .snippet { margin-top:7px; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; max-width:100%; }
     .pill { display:inline-block; padding:3px 8px; border-radius:999px; font-size:11px; margin:3px 4px 0 0; background:#e7f5f1; color:#11635f; }
     .pill.error { background:#ffebe5; color:#a34323; }
     .pill.running { background:#fff4dc; color:#8a5a00; }
@@ -47,8 +47,8 @@
     .job-name { font-weight:700; color:var(--navy); }
     .job-meta { color:var(--muted); font-size:12px; margin-top:4px; }
     .empty { color:var(--muted); padding:8px 0; }
-    table { width:100%; border-collapse:collapse; font-size:13px; }
-    th,td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+    table { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+    th,td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; word-break:break-word; }
     th { color:var(--navy); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
     footer { color:var(--muted); text-align:center; font-size:12px; margin-top:26px; }
     @media (max-width:850px) { .grid,.two,.ingest { grid-template-columns:1fr 1fr; } }
@@ -192,7 +192,7 @@
     $('uploadBtn').addEventListener('click', uploadFiles);
     $('question').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
     $('clearBtn').addEventListener('click', () => { $('question').value = ''; $('facts').innerHTML = '<div class="empty">No results yet.</div>'; $('documents').innerHTML = '<div class="empty">No results yet.</div>'; $('answer').innerHTML = '<div class="empty">No model answer yet.</div>'; $('modelStatus').textContent = ''; $('message').textContent = 'Enter a question to retrieve matching facts and document passages.'; });
-    async function loadModelStatus() { const response = await fetch('/api/llm'); const data = await response.json(); $('modelStatus').textContent = data.configured ? `Configured model: ${data.model}` : 'No Ollama model configured. Evidence retrieval is available.'; }
+    async function loadModelStatus() { const response = await fetch('/api/llm'); const data = await response.json(); $('modelStatus').textContent = data.configured ? `Configured model: ${data.model}` : 'No local LLM configured. Current results are retrieved evidence, not a synthesized answer.'; }
     Promise.all([loadHealth(), loadSources(), loadModelStatus(), loadJobs()]).catch(error => { $('message').textContent = 'Could not load the knowledge base: ' + error; });
   </script>
 </body>

@@ -9,6 +9,8 @@ from typing import Any
 import duckdb
 import requests
 
+from agri_rag.llm import DEFAULT_BASE_URL, normalize_base_url
+
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "data" / "knowledge_base.duckdb"
@@ -17,7 +19,8 @@ MANIFEST_PATH = ROOT / "data" / "vector_manifest.json"
 
 
 def embedding_settings() -> dict[str, str | bool]:
-    base_url = os.getenv("AGRI_EMBED_BASE_URL", os.getenv("AGRI_LLM_BASE_URL", "http://127.0.0.1:11434")).rstrip("/")
+    raw = os.getenv("AGRI_EMBED_BASE_URL", os.getenv("AGRI_LLM_BASE_URL", DEFAULT_BASE_URL))
+    base_url = normalize_base_url(raw)
     model = os.getenv("AGRI_EMBED_MODEL", "").strip()
     return {"base_url": base_url, "model": model, "configured": bool(model)}
 
@@ -27,13 +30,18 @@ def embed(texts: list[str]) -> list[list[float]]:
     if not config["configured"]:
         raise RuntimeError("Set AGRI_EMBED_MODEL to build or search the vector index.")
     response = requests.post(
-        f"{config['base_url']}/api/embed",
-        json={"model": config["model"], "input": texts, "truncate": True},
+        f"{config['base_url']}/embeddings",
+        json={"model": config["model"], "input": texts},
         timeout=180,
     )
     response.raise_for_status()
-    vectors = response.json().get("embeddings")
-    if not vectors or len(vectors) != len(texts):
+    data = response.json().get("data")
+    if not data or len(data) != len(texts):
+        raise RuntimeError("Embedding service returned an unexpected response")
+    # OpenAI-compatible responses carry an index per item; order by it to be safe.
+    ordered = sorted(data, key=lambda item: item.get("index", 0))
+    vectors = [item["embedding"] for item in ordered]
+    if any(not isinstance(vector, list) or not vector for vector in vectors):
         raise RuntimeError("Embedding service returned an unexpected response")
     return vectors
 

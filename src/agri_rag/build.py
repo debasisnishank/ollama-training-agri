@@ -30,6 +30,14 @@ RAW_DIR = DATA_DIR / "raw"
 WEB_RAW_DIR = RAW_DIR / "web"
 LOCAL_RAW_DIR = RAW_DIR / "local"
 DB_PATH = DATA_DIR / "knowledge_base.duckdb"
+UPLOAD_DIR = DATA_DIR / "uploads"
+
+HEADER_TERMS = {
+    "date", "day", "month", "year", "district", "state", "village", "taluk", "tehsil",
+    "crop", "acre", "acreage", "area", "yield", "production", "rain", "rainfall", "ppt",
+    "ndvi", "soil", "moisture", "health", "healthy", "stressed", "moderate", "total",
+    "metric", "value", "unit", "latitude", "longitude", "lat", "lon", "season",
+}
 
 
 def json_default(value: Any) -> Any:
@@ -87,6 +95,76 @@ def guess_unit(metric: str) -> str:
     return "source_unit"
 
 
+# Column-role vocabulary. Headers are classified so that geography and period
+# become structured fact dimensions, and non-metric columns stop producing facts.
+GEO_TERMS = {
+    "district", "state", "taluk", "taluka", "tehsil", "village", "block",
+    "mandal", "region", "subdistrict", "sub-district", "panchayat",
+}
+PERIOD_TERMS = {"date", "day", "month", "year", "period", "season"}
+SKIP_METRIC_TERMS = {
+    "id", "row labels", "sl no", "s.no", "s no", "sno", "serial", "sr no",
+    "no", "unit", "metric",
+}
+MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec"
+
+
+def header_role(header: str) -> str:
+    """Classify a column header as geo, period, metric or skip."""
+    key = normalize_text(header).lower()
+    if not key or key.startswith("column_"):
+        return "skip"
+    parts = set(re.split(r"[ _/\-]+", key))
+    if key in GEO_TERMS or parts & GEO_TERMS:
+        return "geo"
+    if key in PERIOD_TERMS or parts & PERIOD_TERMS:
+        return "period"
+    if key in SKIP_METRIC_TERMS:
+        return "skip"
+    if re.fullmatch(r"[0-9][0-9.,]*", key):
+        # A purely numeric "header" means header detection failed on this sheet;
+        # such columns are not real metrics.
+        return "skip"
+    return "metric"
+
+
+def period_hint(*sources: str) -> str:
+    """Best-effort period string from sheet/file names, e.g. '15 Oct 2026'."""
+    blob = " ".join(sources)
+    day_month = (
+        re.search(rf"(\d{{1,2}})(?:st|nd|rd|th)?[ _-]?({MONTHS})", blob, re.I)
+        or re.search(rf"({MONTHS})[ _-]?(\d{{1,2}})(?:st|nd|rd|th)?", blob, re.I)
+    )
+    year = re.search(r"(19|20)\d{2}", blob)
+    bits: list[str] = []
+    if day_month:
+        a, b = day_month.groups()
+        if a.isdigit():
+            bits.append(f"{a} {b.title()}")
+        else:
+            bits.append(f"{b} {a.title()}")
+    if year:
+        bits.append(year.group(0))
+    return " ".join(bits)
+
+
+def row_dimensions(headers: list[str], values: list[str], roles: list[str], hint: str) -> tuple[str, str]:
+    """Return (geography, period) for a row given its classified headers."""
+    geo: list[str] = []
+    period: list[str] = []
+    for i, role in enumerate(roles):
+        if i >= len(values):
+            break
+        value = values[i]
+        if not value or value.startswith("=") or value.lower() == headers[i].lower():
+            continue
+        if role == "geo" and value not in geo:
+            geo.append(value)
+        elif role == "period" and value not in period:
+            period.append(value)
+    return " > ".join(geo), (" ".join(period).strip() or hint)
+
+
 def row_to_values(row: Iterable[Any]) -> list[Any]:
     values = []
     for cell in row:
@@ -96,14 +174,21 @@ def row_to_values(row: Iterable[Any]) -> list[Any]:
 
 def find_header_row(rows: list[list[Any]]) -> int:
     best_index = 0
-    best_score = -1
+    best_score = float("-inf")
     for idx, row in enumerate(rows[:20]):
         values = [normalize_text(v) for v in row]
         nonempty = [v for v in values if v]
         if not nonempty:
             continue
-        text_count = sum(numeric_value(v) is None for v in nonempty)
-        score = len(nonempty) + (text_count * 0.25)
+        lowered = [v.lower() for v in nonempty]
+        keyword_hits = sum(
+            1 for value in lowered
+            if any(term == value or term in value.split("_") or term in value.split(" ") for term in HEADER_TERMS)
+        )
+        numeric_count = sum(numeric_value(v) is not None for v in nonempty)
+        formula_count = sum(v.startswith("=") or "arrayformula" in v.lower() for v in nonempty)
+        text_count = len(nonempty) - numeric_count
+        score = (keyword_hits * 5.0) + min(len(nonempty), 12) + (text_count * 0.25) - (numeric_count * 1.5) - (formula_count * 1.0)
         if score > best_score:
             best_index = idx
             best_score = score
@@ -125,6 +210,8 @@ def extract_workbook(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, A
         for i, value in enumerate(nonempty_rows[header_index]):
             header = normalize_text(value) or f"column_{i + 1}"
             headers.append(header)
+        roles = [header_role(h) for h in headers]
+        sheet_hint = period_hint(sheet.title, path.name)
         metadata["sheets"].append({
             "name": sheet.title,
             "row_count": len(rows),
@@ -150,14 +237,15 @@ def extract_workbook(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, A
                 "fields": fields,
                 "raw_values": values,
             })
-            context = " | ".join(v for v in values[:4] if v)
+            geography, period = row_dimensions(headers, values, roles, sheet_hint)
+            context = " | ".join(p for p in (geography, period) if p) or " | ".join(v for v in values[:4] if v)
             for col_index, raw in enumerate(row):
+                if col_index >= len(headers) or roles[col_index] != "metric":
+                    continue
                 value = numeric_value(raw)
-                if value is None or col_index >= len(headers):
+                if value is None:
                     continue
                 metric = headers[col_index]
-                if col_index == 0 and metric.lower() in {"id", "row labels", "village", "district", "taluk", "tehsil"}:
-                    continue
                 facts.append({
                     "fact_id": f"{record_id}|{col_index + 1}",
                     "source_file": path.name,
@@ -166,6 +254,8 @@ def extract_workbook(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, A
                     "metric": metric,
                     "value": value,
                     "unit": guess_unit(metric),
+                    "geography": geography,
+                    "period": period,
                     "context": context,
                     "raw_value": normalize_text(raw),
                 })
@@ -215,6 +305,8 @@ def extract_delimited(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
         dialect = csv.excel_tab if path.suffix.lower() == ".tsv" else csv.excel
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
     headers = [normalize_text(h) or f"column_{i + 1}" for i, h in enumerate(reader.fieldnames or [])]
+    roles = [header_role(h) for h in headers]
+    hint = period_hint(path.stem, path.name)
     records: list[dict[str, Any]] = []
     facts: list[dict[str, Any]] = []
     for row_number, row in enumerate(reader, start=2):
@@ -232,14 +324,15 @@ def extract_delimited(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
             "fields": fields,
             "raw_values": values,
         })
-        context = " | ".join(v for v in values[:4] if v)
+        geography, period = row_dimensions(headers, values, roles, hint)
+        context = " | ".join(p for p in (geography, period) if p) or " | ".join(v for v in values[:4] if v)
         for col_index, raw in enumerate(values):
+            if col_index >= len(headers) or roles[col_index] != "metric":
+                continue
             value = numeric_value(raw)
-            if value is None or col_index >= len(headers):
+            if value is None:
                 continue
             metric = headers[col_index]
-            if col_index == 0 and metric.lower() in {"id", "village", "district", "taluk", "tehsil"}:
-                continue
             facts.append({
                 "fact_id": f"{record_id}|{col_index + 1}",
                 "source_file": path.name,
@@ -248,6 +341,8 @@ def extract_delimited(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
                 "metric": metric,
                 "value": value,
                 "unit": guess_unit(metric),
+                "geography": geography,
+                "period": period,
                 "context": context,
                 "raw_value": raw,
             })
@@ -373,6 +468,8 @@ def build_database(records: list[dict[str, Any]], facts: list[dict[str, Any]], d
             metric varchar,
             value double,
             unit varchar,
+            geography varchar,
+            period varchar,
             context varchar,
             raw_value varchar
         )
@@ -403,8 +500,8 @@ def build_database(records: list[dict[str, Any]], facts: list[dict[str, Any]], d
         [(r["record_id"], r["source_file"], r["sheet_name"], r["row_number"], r["header_row_index"], json_text(r["fields"]), json_text(r["raw_values"])) for r in records],
     )
     con.executemany(
-        "insert into agricultural_facts values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [(f["fact_id"], f["source_file"], f["sheet_name"], f["row_number"], f["metric"], f["value"], f["unit"], f["context"], f["raw_value"]) for f in facts],
+        "insert into agricultural_facts values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(f["fact_id"], f["source_file"], f["sheet_name"], f["row_number"], f["metric"], f["value"], f["unit"], f.get("geography", ""), f.get("period", ""), f["context"], f["raw_value"]) for f in facts],
     )
     con.executemany(
         "insert into document_chunks values (?, ?, ?, ?, ?)",
@@ -434,18 +531,35 @@ def build(upload_paths: Iterable[Path] | None = None) -> dict[str, Any]:
     workbook_metadata = []
     document_metadata = []
     sources: list[tuple[str, Path]] = [(relative, ROOT / relative) for relative in config.get("local_files", [])]
-    for upload_path in upload_paths or []:
+    staged_uploads = upload_paths
+    if staged_uploads is None and UPLOAD_DIR.exists():
+        staged_uploads = sorted(path for path in UPLOAD_DIR.iterdir() if path.is_file())
+    for upload_path in staged_uploads or []:
         upload_path = Path(upload_path)
         sources.append((f"upload/{upload_path.name}", upload_path))
 
+    seen_checksums: dict[str, str] = {}
     for relative, source_path in sources:
         if not source_path.exists():
             local_manifest.append({"source_id": relative, "source": relative, "status": "missing", "path": None})
             continue
+        digest = checksum_bytes(source_path.read_bytes())
+        if digest in seen_checksums:
+            # Same bytes already ingested (e.g. a file re-uploaded that is also a
+            # configured source). Skip so facts and chunks are not double-counted.
+            local_manifest.append({
+                "source_id": relative,
+                "source": relative,
+                "status": "duplicate",
+                "path": None,
+                "sha256": digest,
+                "notes": f"identical content to {seen_checksums[digest]}; skipped",
+            })
+            continue
+        seen_checksums[digest] = relative
         copied = local_raw / source_path.name
         if source_path.resolve() != copied.resolve():
             copied.write_bytes(source_path.read_bytes())
-        digest = checksum_bytes(copied.read_bytes())
         local_manifest.append({"source_id": relative, "source": relative, "status": "ok", "path": str(copied.relative_to(ROOT)), "sha256": digest})
         if source_path.suffix.lower() == ".xlsx":
             new_records, new_facts, meta = extract_workbook(source_path)
@@ -459,7 +573,16 @@ def build(upload_paths: Iterable[Path] | None = None) -> dict[str, Any]:
                 ]
                 note_text = " | ".join(note_parts)
                 lower_note = note_text.lower()
-                if len(note_text) >= 120 or "ndvi range" in lower_note or "normalized difference vegetation" in lower_note:
+                letters = sum(ch.isalpha() for ch in note_text)
+                digits = sum(ch.isdigit() for ch in note_text)
+                is_legend = any(
+                    key in lower_note
+                    for key in ("ndvi range", "normalized difference vegetation", "stressed villages")
+                )
+                # Keep only genuinely textual annotations (legends, definitions).
+                # Numeric data rows already live in agricultural_facts and must not
+                # pollute the semantic document store with rows of bare numbers.
+                if is_legend or (letters >= 40 and letters > digits):
                     documents.append({
                         "document_id": f"{record['record_id']}|note",
                         "source_file": record["source_file"],
@@ -482,6 +605,29 @@ def build(upload_paths: Iterable[Path] | None = None) -> dict[str, Any]:
             documents.extend(new_documents)
             document_metadata.append(meta)
     web_manifest = snapshot_web_sources(config)
+    web_chunk_count = 0
+    for snap in web_manifest:
+        if snap.get("error") or not snap.get("path"):
+            continue
+        web_path = ROOT / snap["path"]
+        try:
+            web_chunks, _ = extract_text_file(web_path)
+        except Exception:
+            # A snapshot that cannot be parsed should not abort the build.
+            continue
+        for chunk in web_chunks:
+            text = chunk["text"]
+            if len(text) < 40:
+                # Drop boilerplate fragments (nav labels, "enable JavaScript").
+                continue
+            documents.append({
+                "document_id": f"web|{snap['source_id']}|{chunk['location'].replace(' ', '_')}",
+                "source_file": snap["source_id"],
+                "source_type": f"web_{web_path.suffix.lstrip('.') or 'text'}",
+                "location": snap.get("url") or snap["source_id"],
+                "text": text,
+            })
+            web_chunk_count += 1
     manifest = {"local": local_manifest, "web": web_manifest}
     write_jsonl(DATA_DIR / "facts.jsonl", facts)
     write_jsonl(DATA_DIR / "documents.jsonl", documents)
@@ -491,6 +637,8 @@ def build(upload_paths: Iterable[Path] | None = None) -> dict[str, Any]:
         "workbook_rows": len(records),
         "agricultural_facts": len(facts),
         "document_chunks": len(documents),
+        "web_document_chunks": web_chunk_count,
+        "duplicates_skipped": [m["source_id"] for m in local_manifest if m.get("status") == "duplicate"],
         "workbooks": workbook_metadata,
         "documents": document_metadata,
         "web_snapshots": web_manifest,

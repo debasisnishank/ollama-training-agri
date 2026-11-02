@@ -7,11 +7,27 @@ from typing import Any
 import requests
 
 
-DEFAULT_BASE_URL = "http://127.0.0.1:11434"
+# OpenAI-compatible endpoint. Works against LM Studio (default below) and, with
+# AGRI_LLM_BASE_URL pointed at it, Ollama's /v1 surface on the Nano deployment.
+DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1"
+
+
+def normalize_base_url(raw: str) -> str:
+    """Return an OpenAI-style base URL ending in /v1.
+
+    Accepts http://host:port, http://host:port/v1 or a legacy Ollama
+    http://host:port/api value so a single setting works across runtimes.
+    """
+    base = raw.strip().rstrip("/")
+    if base.endswith("/api"):
+        base = base[: -len("/api")]
+    if not base.endswith("/v1"):
+        base = f"{base}/v1"
+    return base
 
 
 def settings() -> dict[str, str | bool]:
-    base_url = os.getenv("AGRI_LLM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    base_url = normalize_base_url(os.getenv("AGRI_LLM_BASE_URL", DEFAULT_BASE_URL))
     model = os.getenv("AGRI_LLM_MODEL", "").strip()
     return {"base_url": base_url, "model": model, "configured": bool(model)}
 
@@ -39,7 +55,7 @@ def ask(question: str, evidence: dict[str, Any]) -> dict[str, Any]:
             "answer": None,
             "error": "Set AGRI_LLM_MODEL to enable local model answers.",
         }
-    url = f"{config['base_url']}/api/chat"
+    url = f"{config['base_url']}/chat/completions"
     payload = {
         "model": config["model"],
         "messages": [
@@ -47,16 +63,18 @@ def ask(question: str, evidence: dict[str, Any]) -> dict[str, Any]:
             {"role": "user", "content": build_prompt(question, evidence)},
         ],
         "stream": False,
-        "options": {"temperature": 0.1},
+        "temperature": 0.1,
     }
     try:
-        response = requests.post(url, json=payload, timeout=180)
+        # Generous timeout: the first call after the server loads a large model
+        # cold can take well over the warm ~25s before the first token.
+        response = requests.post(url, json=payload, timeout=600)
         response.raise_for_status()
         body = response.json()
-        answer = body.get("message", {}).get("content", "").strip()
+        choices = body.get("choices") or []
+        answer = (choices[0].get("message", {}).get("content", "") if choices else "").strip()
         if not answer:
-            raise RuntimeError("Ollama returned an empty answer")
+            raise RuntimeError("Model server returned an empty answer")
         return {"available": True, "model": config["model"], "answer": answer, "error": None}
     except Exception as exc:
         return {"available": False, "model": config["model"], "answer": None, "error": str(exc)}
-

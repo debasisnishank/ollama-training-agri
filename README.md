@@ -42,23 +42,42 @@ The UI also provides a local ingestion console. Upload one or more XLSX, CSV/TSV
 
 For easier later access, run `./start_ui.sh` from the project folder.
 
-To enable local Ollama answers, set a model before starting the UI:
+The model layer talks to any OpenAI-compatible server. On the Mac this is **LM Studio**
+(default `http://127.0.0.1:1234/v1`); on the Ubuntu/Nano deployment it is **Ollama**
+(`http://127.0.0.1:11434/v1`). The same code targets both — only the base URL and model
+name change. The base URL may be given with or without the trailing `/v1`.
+
+Start LM Studio's server and load the models once:
 
 ```bash
-export AGRI_LLM_BASE_URL=http://127.0.0.1:11434
-export AGRI_LLM_MODEL=<your-local-model>
+lms server start
+lms load qwen/qwen3-coder-30b --gpu max
+lms load text-embedding-nomic-embed-text-v1.5
+```
+
+Then point the app at it before starting the UI:
+
+```bash
+export AGRI_LLM_BASE_URL=http://127.0.0.1:1234/v1
+export AGRI_LLM_MODEL=qwen/qwen3-coder-30b
 .venv/bin/python scripts/ui_server.py
 ```
 
-Ollama's local API is expected at `/api/chat`; the answer prompt includes the retrieved facts and document evidence and asks the model to preserve source, period, geography and unit details.
+The chat endpoint is `/v1/chat/completions`; the answer prompt includes the retrieved
+facts and document evidence and asks the model to preserve source, period, geography and
+unit details. The first request after a cold model load can take a minute; later warm
+answers return in roughly 25 seconds.
 
-To build the optional semantic document index, configure an Ollama embedding model and run:
+To build the optional semantic document index, configure an embedding model and run:
 
 ```bash
-export AGRI_EMBED_BASE_URL=http://127.0.0.1:11434
-export AGRI_EMBED_MODEL=<your-embedding-model>
+export AGRI_EMBED_BASE_URL=http://127.0.0.1:1234/v1
+export AGRI_EMBED_MODEL=text-embedding-nomic-embed-text-v1.5
 .venv/bin/python scripts/build_embeddings.py
 ```
+
+The embedding endpoint is `/v1/embeddings`. On the Nano, substitute the Ollama base URL
+and the equivalent pulled models.
 
 When `data/vector_index.jsonl` exists and the embedding model is available, document retrieval automatically prefers semantic search and falls back to lexical search when it is not.
 - `data/raw/web/` snapshots

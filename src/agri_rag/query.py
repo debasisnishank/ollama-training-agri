@@ -11,10 +11,17 @@ from agri_rag.vector import semantic_search
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "data" / "knowledge_base.duckdb"
+STOPWORDS = {
+    "the", "and", "for", "from", "with", "what", "which", "where", "when", "does", "show",
+    "give", "tell", "about", "data", "file", "files", "report", "number", "numbers", "value", "values",
+}
 
 
 def tokens(text: str) -> list[str]:
-    return [t.lower() for t in re.findall(r"[A-Za-z0-9_]+", text) if len(t) > 2 or t.isdigit()]
+    return [
+        t.lower() for t in re.findall(r"[A-Za-z0-9_]+", text)
+        if (len(t) > 2 or t.isdigit()) and t.lower() not in STOPWORDS
+    ]
 
 
 def fact_search(question: str, limit: int = 12) -> list[dict[str, Any]]:
@@ -24,13 +31,36 @@ def fact_search(question: str, limit: int = 12) -> list[dict[str, Any]]:
     if not search_tokens:
         return []
     con = duckdb.connect(str(DB_PATH), read_only=True)
-    searchable = "lower(coalesce(context, '') || ' ' || coalesce(metric, '') || ' ' || coalesce(source_file, '') || ' ' || coalesce(sheet_name, ''))"
-    score_expr = " + ".join([f"case when {searchable} like ? then 1 else 0 end"] * len(search_tokens))
-    score_params = [f"%{token}%" for token in search_tokens]
-    where = " or ".join([f"{searchable} like ?" for _ in search_tokens])
-    where_params = [f"%{token}%" for token in search_tokens]
+    metric = "lower(coalesce(metric, ''))"
+    sheet = "lower(coalesce(sheet_name, ''))"
+    geography = "lower(coalesce(geography, ''))"
+    period = "lower(coalesce(period, ''))"
+    context = "lower(coalesce(context, ''))"
+    source = "lower(coalesce(source_file, ''))"
+    score_parts = []
+    score_params = []
+    where_parts = []
+    where_params = []
+    for token in search_tokens:
+        pattern = f"%{token}%"
+        score_parts.extend([
+            f"case when {metric} like ? then 5 else 0 end",
+            f"case when {geography} like ? then 4 else 0 end",
+            f"case when {sheet} like ? then 3 else 0 end",
+            f"case when {period} like ? then 2 else 0 end",
+            f"case when {context} like ? then 1 else 0 end",
+            f"case when {source} like ? then 0.25 else 0 end",
+        ])
+        score_params.extend([pattern] * 6)
+        where_parts.append(
+            f"({metric} like ? or {geography} like ? or {sheet} like ? "
+            f"or {period} like ? or {context} like ? or {source} like ?)"
+        )
+        where_params.extend([pattern] * 6)
+    score_expr = " + ".join(score_parts)
+    where = " or ".join(where_parts)
     rows = con.execute(
-        f"select fact_id, source_file, sheet_name, row_number, metric, value, unit, context, ({score_expr}) as score from agricultural_facts where {where} order by score desc, case when lower(sheet_name) = 'summary' then 1 else 0 end desc, source_file, sheet_name, row_number limit ?",
+        f"select fact_id, source_file, sheet_name, row_number, metric, value, unit, geography, period, context, cast(round(({score_expr}), 2) as double) as score from agricultural_facts where {where} order by score desc, source_file, sheet_name, row_number limit ?",
         score_params + where_params + [limit],
     ).fetchall()
     columns = [d[0] for d in con.description]
@@ -52,12 +82,25 @@ def document_search(question: str, limit: int = 8) -> list[dict[str, Any]]:
         # Keep the local UI useful when Ollama or the embedding index is not configured.
         pass
     con = duckdb.connect(str(DB_PATH), read_only=True)
-    score_expr = " + ".join(["case when lower(text) like ? then 1 else 0 end"] * len(search_tokens))
-    score_params = [f"%{token}%" for token in search_tokens]
-    where = " or ".join(["lower(text) like ?" for _ in search_tokens])
-    where_params = [f"%{token}%" for token in search_tokens]
+    text_expr = "lower(coalesce(text, ''))"
+    source_expr = "lower(coalesce(source_file, '') || ' ' || coalesce(location, ''))"
+    score_parts = []
+    score_params = []
+    where_parts = []
+    where_params = []
+    for token in search_tokens:
+        pattern = f"%{token}%"
+        score_parts.extend([
+            f"case when {text_expr} like ? then 2 else 0 end",
+            f"case when {source_expr} like ? then 0.25 else 0 end",
+        ])
+        score_params.extend([pattern, pattern])
+        where_parts.append(f"({text_expr} like ? or {source_expr} like ?)")
+        where_params.extend([pattern, pattern])
+    score_expr = " + ".join(score_parts)
+    where = " or ".join(where_parts)
     rows = con.execute(
-        f"select document_id, source_file, location, text, ({score_expr}) as score from document_chunks where {where} order by score desc limit ?",
+        f"select document_id, source_file, location, text, cast(round(({score_expr}), 2) as double) as score from document_chunks where {where} order by score desc limit ?",
         score_params + where_params + [limit],
     ).fetchall()
     columns = [d[0] for d in con.description]
