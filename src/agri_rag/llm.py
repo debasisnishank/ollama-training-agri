@@ -35,13 +35,23 @@ def settings() -> dict[str, str | bool]:
 def build_prompt(question: str, evidence: dict[str, Any]) -> str:
     facts = evidence.get("facts", [])[:12]
     documents = evidence.get("documents", [])[:8]
+    aggregation = evidence.get("aggregation")
+    agg_block = ""
+    if aggregation:
+        agg_block = (
+            "COMPUTED AGGREGATION (authoritative — this value was calculated "
+            "directly over the full dataset with SQL; use it as the answer and do "
+            "NOT re-sum the individual facts below, which are only a sample):\n"
+            f"{json.dumps(aggregation, ensure_ascii=False, indent=2)}\n\n"
+        )
     return (
         "Answer the agricultural question using only the evidence below. "
         "Do not invent values. For numerical answers, include the value, unit, "
         "geography, period and source file or source page. If the evidence is "
         "insufficient or conflicting, say so clearly. Keep the answer concise.\n\n"
         f"QUESTION:\n{question}\n\n"
-        f"STRUCTURED FACTS:\n{json.dumps(facts, ensure_ascii=False, indent=2)}\n\n"
+        f"{agg_block}"
+        f"STRUCTURED FACTS (sample, may be truncated):\n{json.dumps(facts, ensure_ascii=False, indent=2)}\n\n"
         f"DOCUMENT EVIDENCE:\n{json.dumps(documents, ensure_ascii=False, indent=2)}"
     )
 
